@@ -1,0 +1,6 @@
+build/
+.gradle/
+node_modules/
+app/src/main/jniLibs/
+app/src/main/assets/ffish.*
+local.properties

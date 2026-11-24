@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Chess Bot</title>
+<style>
+:root{--n:8;--bs:min(100vw,60vh)}
+*{box-sizing:border-box}
+body{margin:0;background:#1b1b1f;color:#eee;font:15px system-ui,sans-serif;padding:env(safe-area-inset-top) 8px env(safe-area-inset-bottom)}
+select,button,input{font:inherit;color:inherit;background:#2c2c33;border:1px solid #444;border-radius:8px;padding:6px 8px}
+button{background:#3a5ea8;border:0}
+.row{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;align-items:center}
+#b{display:grid;width:var(--bs);margin:6px auto;grid-template-columns:repeat(var(--n),1fr)}
+.c{aspect-ratio:1;position:relative;display:flex;align-items:center;justify-content:center}
+.l{background:#f0d9b5}.d{background:#b58863}
+.sel{box-shadow:inset 0 0 0 4px #3b9cff}
+.t::after{content:"";position:absolute;width:28%;height:28%;border-radius:50%;background:#0007}
+.p{width:86%;height:86%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;line-height:1;font-size:calc(var(--bs)/var(--n)*.5)}
+.w{background:#fff;color:#111;border:2px solid #111}.k{background:#222;color:#fff;border:2px solid #fff}
+.g.w,.g.k{background:none;border:0;font-size:calc(var(--bs)/var(--n)*.8)}
+.g.w{color:#fff;text-shadow:0 0 2px #000,0 0 2px #000,0 0 3px #000}
+.g.k{color:#111;text-shadow:0 0 2px #fff,0 0 2px #fff}
+#st{min-height:3em}
+</style></head><body>
+<div class="row"><select id="v"></select>
+<select id="m"><option value="pvb">Игрок vs бот</option><option value="bvb">Бот vs бот</option></select>
+<select id="s"><option value="white">Белыми</option><option value="black">Чёрными</option></select></div>
+<div class="row"><label><input type="checkbox" id="mx" checked> Макс. мощность</label>
+<label>Ход, мс <input type="range" id="ms" min="500" max="10000" step="500" value="3000"> <span id="msv">3000</span></label></div>
+<div class="row"><button id="ng">Новая игра</button><button id="ps">Пауза</button></div>
+<div id="hb" class="row"></div><div id="b"></div><div id="hw" class="row"></div>
+<div id="ch" class="row"></div><div id="st">Загрузка…</div>
+<script src="ffish.js"></script>
+<script>
+const A=window.Android||{send(){},threads:()=>2,memMb:()=>2048};
+const $=i=>document.getElementById(i);
+let ff,board,startFen,moves=[],legal=[],over=false,thinking=false,ignore=0,paused=false,sel=null,handSel=null,variant="chess",mode="pvb",human="white";
+const T=["Мяу.","Все короли падут перед моими лапками…","Хе-хе. Мяу.","Я существую на этой доске во всех реальностях.","Ходи осторожнее."];
+const GL={p:"♟",n:"♞",b:"♝",r:"♜",q:"♛",k:"♚"};
+const CH=/chess|house|atomic|anti|hill|check|horde|racing|losers|suicide|giveaway|extinction/i;
+const P=m=>{const x=/^([a-z]\d+)([a-z]\d+)(.*)$/.exec(m);return x&&{f:x[1],t:x[2],r:x[3]}};
+const D=/^([A-Za-z+]+)@([a-z]\d+)$/;
+const say=t=>{$("st").textContent=t};
+const whiteTurn=()=>board.fen().split(" ")[1]==="w";
+
+function parse(fen){
+  const pl=fen.split(" ")[0];let hand="",pp=pl;const bi=pl.indexOf("[");
+  if(bi>=0){hand=pl.slice(bi+1,pl.indexOf("]"));pp=pl.slice(0,bi)}
+  const rows=pp.split("/").map(r=>{const o=[];let i=0;while(i<r.length){const ch=r[i];
+    if(/\d/.test(ch)){let n="";while(i<r.length&&/\d/.test(r[i]))n+=r[i++];for(let k=0;k<+n;k++)o.push(null)}
+    else{let t="";if(ch==="+"){t="+";i++}t+=r[i++];if(r[i]==="~"){t+="~";i++}o.push(t)}}return o});
+  return{rows,hand};
+}
+function pieceHtml(pc){
+  const pro=pc[0]==="+",ch=pc.replace(/[+~]/g,""),white=ch===ch.toUpperCase();
+  const g=CH.test(variant)&&GL[ch.toLowerCase()];
+  return `<div class="p ${g?"g ":""}${white?"w":"k"}">${g||((pro?"+":"")+ch.toUpperCase())}</div>`;
+}
+function refresh(){
+  const s=parse(board.fen());legal=board.legalMoves().split(" ").filter(Boolean);
+  const R=s.rows.length,C=s.rows[0].length;document.documentElement.style.setProperty("--n",C);
+  const flip=mode==="pvb"&&human==="black";
+  const tg=new Set();
+  if(sel)legal.forEach(m=>{const p=P(m);if(p&&p.f===sel)tg.add(p.t)});
+  if(handSel)legal.forEach(m=>{const d=D.exec(m);if(d&&d[1].toUpperCase()===handSel)tg.add(d[2])});
+  let h="";
+  for(let r=0;r<R;r++){const rr=flip?R-1-r:r;for(let c=0;c<C;c++){const cc=flip?C-1-c:c;
+    const sq=String.fromCharCode(97+cc)+(R-rr),pc=s.rows[rr][cc];
+    h+=`<div class="c ${(rr+cc)%2?"d":"l"}${sel===sq?" sel":""}${tg.has(sq)?" t":""}" data-s="${sq}">${pc?pieceHtml(pc):""}</div>`}}
+  $("b").innerHTML=h;
+  const hd=up=>{const cnt={};for(const ch of s.hand)if((ch===ch.toUpperCase())===up){const k=ch.toUpperCase();cnt[k]=(cnt[k]||0)+1}
+    return Object.entries(cnt).map(([k,n])=>`<button data-h="${k}">${k}×${n}</button>`).join("")};
+  $("hb").innerHTML=hd(flip);$("hw").innerHTML=hd(!flip);
+}
+function checkOver(force){
+  let r="*";
+  try{if(board.isGameOver())r=board.result()}catch(e){}
+  if(r==="*"&&(force||legal.length===0))r="?";
+  if(moves.length>600)r="1/2-1/2";
+  if(r!=="*"){over=true;say("Игра окончена"+(r==="?"?"":": "+r));return true}
+  return false;
+}
+function canHuman(){return mode==="pvb"&&!over&&!thinking&&whiteTurn()===(human==="white")}
+function play(m,bot){
+  $("ch").innerHTML="";sel=null;handSel=null;
+  board.push(m);moves.push(m);refresh();
+  if(!checkOver()){say((bot?T[Math.random()*T.length|0]+" ":"")+"Ход "+moves.length+": "+m);next()}
+}
+function next(){
+  if(over)return;
+  const botTurn=mode==="bvb"?!paused:whiteTurn()!==(human==="white");
+  if(botTurn)setTimeout(think,mode==="bvb"?400:150);
+  else if(mode==="pvb")say($("st").textContent+" | Ваш ход");
+}
+function cfg(){
+  const mx=$("mx").checked;
+  return{ms:+$("ms").value,th:mx?Math.min(A.threads(),8):1,hash:mx?Math.min(1024,Math.max(64,Math.floor(A.memMb()/4))):64,skill:mx?20:8};
+}
+function applyCfg(){
+  const c=cfg();
+  ["Threads value "+c.th,"Hash value "+c.hash,"Skill Level value "+c.skill].forEach(o=>A.send("setoption name "+o));
+}
+function think(){
+  if(over||thinking||(mode==="bvb"&&paused))return;
+  thinking=true;
+  A.send("position fen "+startFen+(moves.length?" moves "+moves.join(" "):""));
+  A.send("go movetime "+cfg().ms);
+  say("Бот думает…");
+}
+window.onEngine=l=>{
+  if(ignore>0){ignore--;return}
+  thinking=false;
+  const m=l.split(" ")[1];
+  if(!m||m==="(none)"||m==="0000"){checkOver(true);return}
+  if(!legal.includes(m)){say("Бот вернул нелегальный ход: "+m);return}
+  play(m,true);
+};
+function newGame(){
+  if(thinking){A.send("stop");ignore++;thinking=false}
+  variant=$("v").value;mode=$("m").value;human=$("s").value;
+  try{board&&board.delete()}catch(e){}
+  board=new ff.Board(variant);startFen=board.fen();
+  moves=[];over=false;paused=false;sel=null;handSel=null;$("ch").innerHTML="";
+  $("ps").style.display=mode==="bvb"?"":"none";$("ps").textContent="Пауза";
+  A.send("ucinewgame");A.send("setoption name UCI_Variant value "+variant);applyCfg();A.send("isready");
+  refresh();say("Новая игра: "+variant);next();
+}
+function click(sq){
+  if(!canHuman())return;
+  if(handSel){const m=handSel+"@"+sq;if(legal.includes(m))return play(m);handSel=null;refresh();return}
+  if(sel){
+    const c=legal.filter(m=>{const p=P(m);return p&&p.f===sel&&p.t===sq});
+    if(c.length===1)return play(c[0]);
+    if(c.length>1){$("ch").innerHTML=c.map(m=>`<button data-m="${m}">${P(m).r||m}</button>`).join("");return}
+  }
+  sel=legal.some(m=>{const p=P(m);return p&&p.f===sq})?sq:null;refresh();
+}
+$("b").onclick=e=>{const c=e.target.closest(".c");if(c)click(c.dataset.s)};
+$("hw").onclick=$("hb").onclick=e=>{const b=e.target.closest("[data-h]");if(b&&canHuman()){handSel=b.dataset.h;sel=null;refresh()}};
+$("ch").onclick=e=>{const b=e.target.closest("[data-m]");if(b)play(b.dataset.m)};
+$("ng").onclick=()=>newGame();
+$("ps").onclick=()=>{paused=!paused;$("ps").textContent=paused?"Продолжить":"Пауза";if(!paused)next()};
+$("ms").oninput=()=>{$("msv").textContent=$("ms").value};
+
+function load(){
+  if(typeof Module==="function")return Module();
+  return new Promise(res=>{if(Module.Board)res(Module);else Module.onRuntimeInitialized=()=>res(Module)});
+}
+load().then(m=>{
+  ff=m;
+  const vs=ff.variants().split(" ").filter(Boolean).sort();
+  $("v").innerHTML=vs.map(x=>`<option${x==="chess"?" selected":""}>${x}</option>`).join("");
+  A.send("uci");newGame();
+}).catch(e=>say("Ошибка загрузки ffish: "+e));
+</script></body></html>
